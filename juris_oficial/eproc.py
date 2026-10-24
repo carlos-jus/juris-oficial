@@ -143,6 +143,10 @@ def buscar(tribunal, busca, maximo=10, tipo="acordao", ordem="relevancia", campo
                 _sessoes.pop(chave, None)
                 raise RuntimeError("o eproc do tribunal está em manutenção (página de indisponibilidade: "
                                    "\"sistema em atualização\"); tente de novo mais tarde")
+            if "Falha ao abrir conexão com o banco de dados" in r.text:
+                _sessoes.pop(chave, None)
+                raise RuntimeError("a pesquisa de jurisprudência do tribunal está fora do ar (\"Falha ao abrir "
+                                   "conexão com o banco de dados\", erro do próprio servidor); tente mais tarde")
             m = re.search(r'id="hdnTotalResultado"[^>]*value="(\d+)"', r.text)
             res.total = int(m.group(1)) if m else (0 if re.search(r"Nenhum|0 documentos", r.text) else None)
             novos = _extrair(r.text, tribunal, base, fonte)
