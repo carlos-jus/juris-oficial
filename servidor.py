@@ -43,9 +43,11 @@ def pesquisar_jurisprudencia(busca: str, tribunais: str = "STF,STJ,TNU,TRF1", ma
     maximo: julgados por tribunal (1-50). completo: true traz a ementa sem corte.
 
     COBERTURA E LIMITES (medidos em 24/10/2026; rode `listar_fontes` para o mapa):
-      - TRF1: acórdãos desde mai/2025 vêm do DJEN (frase exata, data de publicação);
-        até fev/2024, da base antiga do CJF. De mar/2024 a abr/2025 NÃO há fonte.
-      - TR1/TRU1: base antiga do CJF, até ~ago/2026.
+      - TRF1, TR1 e TRU1: acórdãos recentes (último ano) vêm do DJEN, buscados órgão por
+        órgão (42 gabinetes, 103 relatorias de TR, 11 órgãos da TRU) – leva ~50 s; a frase
+        mais longa da busca vai ao DJEN e os demais termos são conferidos no texto; data de
+        publicação. O acervo anterior vem da base antiga do CJF (TRF1 até fev/2024, TR1 até
+        ~ago/2026, TRU1 até ~mar/2025). TRF1 de mar/2024 a abr/2025: NÃO há fonte.
       - TRF5 (Julia): sem data de publicação e sem link do inteiro teor; total limitado a 10.000.
       - eproc (TNU, TRF2, TRF4, TRF6): nas Turmas Recursais, às vezes só a decisão vem no
         resultado – a ementa fica no inteiro teor (Link).

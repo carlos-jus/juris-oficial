@@ -43,17 +43,24 @@ def _trf1(busca, maximo, tipo, ordem):
     return _juntar(recente, cjf_antigo.buscar("TRF1", busca, maximo), "TRF1 até fev/2024 (CJF)")
 
 
+def _jef1(trib, ate):
+    def f(busca, maximo, tipo, ordem):
+        recente = djen.buscar(busca, maximo, instancia=trib)
+        return _juntar(recente, cjf_antigo.buscar(trib, busca, maximo), "%s até %s (CJF)" % (trib, ate))
+    return f
+
+
 FONTES = {
     "STF": ("STF – base oficial (todas as épocas)",
             lambda b, m, t, o: stf.buscar(b, m, tipo=t, ordem=o)),
     "STJ": ("STJ – SCON (todas as épocas)",
             lambda b, m, t, o: stj.buscar(b, m, tipo=t, ordem=o)),
     "TNU": ("TNU – eproc (desde jul/2017) + acervo do CJF", _tnu),
-    "TRF1": ("TRF1 – DJEN (desde mai/2025) + CJF (até fev/2024); LACUNA mar/2024–abr/2025", _trf1),
-    "TR1": ("Turmas Recursais da 1ª Região – CJF/JEF1 (até ~ago/2026)",
-            lambda b, m, t, o: cjf_antigo.buscar("TR1", b, m)),
-    "TRU1": ("TRU da 1ª Região – CJF/JEF1 (até ~ago/2026)",
-             lambda b, m, t, o: cjf_antigo.buscar("TRU1", b, m)),
+    "TRF1": ("TRF1 – DJEN por gabinete (último ano) + CJF (até fev/2024); LACUNA mar/2024–abr/2025", _trf1),
+    "TR1": ("Turmas Recursais da 1ª Região – DJEN por relatoria (último ano) + CJF/JEF1 (até ~ago/2026)",
+            _jef1("TR1", "~ago/2026")),
+    "TRU1": ("TRU da 1ª Região – DJEN por órgão (último ano) + CJF/JEF1 (até ~mar/2025)",
+             _jef1("TRU1", "~mar/2025")),
     "TRF2": ("TRF2 – eproc", _eproc("TRF2")),
     "TR2": ("Turmas Recursais do RJ/ES – eproc", _eproc("TR2")),
     "TRU2": ("TRU da 2ª Região – eproc", _eproc("TRU2")),

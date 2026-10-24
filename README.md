@@ -21,8 +21,8 @@ STJ em dez/2019, STF antes de 2017, TRF1 em fev/2024, Turmas Recursais de 3ª e 
 | STF | jurisprudencia.stf.jus.br | todas as épocas – acórdãos, monocráticas, súmulas |
 | STJ | scon.stj.jus.br (SCON) | todas as épocas – acórdãos e monocráticas |
 | TNU | eproctnu-jur.cjf.jus.br + acervo do CJF | desde jul/2017 (eproc) + período anterior |
-| TRF1 | DJEN (comunicaapi.pje.jus.br) + base antiga do CJF | desde mai/2025 + até fev/2024 – **lacuna mar/2024–abr/2025** |
-| TR1, TRU1 | base antiga do CJF (JEF1) | até ~ago/2026 |
+| TRF1 | DJEN (comunicaapi.pje.jus.br), gabinete por gabinete + base antiga do CJF | último ano + até fev/2024 – **lacuna mar/2024–abr/2025** |
+| TR1, TRU1 | DJEN, órgão por órgão + base antiga do CJF (JEF1) | último ano + até ~ago/2026 (TR1) / ~mar/2025 (TRU1) |
 | TRF2, TR2, TRU2 | eproc.trf2.jus.br | atual |
 | TRF3, TR3, TRU3 | web.trf3.jus.br/jurisprudencia | atual (inclui as 17 Turmas Recursais de SP/MS) |
 | TRF4, TR4, TRU4 | jurisprudencia.trf4.jus.br (eproc) | atual |
@@ -68,7 +68,10 @@ python -m juris_oficial.diagnostico
 ## Limites que importam
 
 - **Zero não prova inexistência** quando a fonte tem limite declarado (TRF1 entre mar/2024 e
-  abr/2025; TRF1 pelo DJEN só por frase exata; Julia com teto de 10.000).
+  abr/2025; 1ª Região pelo DJEN só por frase exata; Julia com teto de 10.000).
+- **1ª Região é mais lenta** (~50 s por tribunal): o DJEN não filtra por instância, então a busca
+  passa por cada gabinete ou relatoria. A primeira vez descobre a lista de órgãos (~1 min por
+  instância) e a guarda por 30 dias.
 - **Confira a literalidade no inteiro teor** antes de citar. A ementa vem literal da base, mas a
   base pode ter erro de digitação ou corte.
 - Os sítios dos tribunais mudam sem aviso. Rode `diagnostico_fontes` quando algo falhar e
