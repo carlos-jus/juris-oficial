@@ -1,4 +1,4 @@
-# Instalador do juris-oficial (Windows / PowerShell).
+﻿# Instalador do juris-oficial (Windows / PowerShell).
 # Uso: clique com o botão direito > "Executar com o PowerShell", ou:
 #   powershell -ExecutionPolicy Bypass -File .\instalar.ps1
 $ErrorActionPreference = "Stop"
@@ -23,6 +23,10 @@ Write-Host "Python: $python"
 # 2. Dependências
 & $python -m pip install --quiet --disable-pip-version-check -r (Join-Path $pasta "requirements.txt")
 if ($LASTEXITCODE -ne 0) { Write-Host "Falha ao instalar as dependências." -ForegroundColor Red; exit 1 }
+# O teste do passo 5 não carrega o servidor: sem esta checagem, um SDK incompatível
+# (mcp 2.x removeu o FastMCP) só aparece no Claude como "Failed to connect".
+& $python -c "import sys`ntry: from mcp.server.fastmcp import FastMCP`nexcept Exception: sys.exit(1)"
+if ($LASTEXITCODE -ne 0) { Write-Host "O pacote 'mcp' instalado não traz o FastMCP (precisa ser 1.x). Rode: $python -m pip install `"mcp>=1.2,<2`"" -ForegroundColor Red; exit 1 }
 Write-Host "Dependências instaladas."
 
 # 3. Navegador (STJ e STF exigem Chrome ou Edge)
