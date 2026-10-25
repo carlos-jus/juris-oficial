@@ -5,7 +5,7 @@ O SCON do STJ (Cloudflare) e a base do STF (WAF da AWS) recusam `requests`, mas
 aceitam o `fetch` disparado de DENTRO de uma página aberta num Chrome ou Edge de
 verdade: mesma origem, cookies reais. Este módulo sobe um navegador SEPARADO do
 que a pessoa usa (perfil próprio, novo a cada abertura, dentro de
-%LOCALAPPDATA%\\juris-oficial\\navegador) e conversa com ele pelo protocolo DevTools (CDP).
+%LOCALAPPDATA%\\juris-oficial\\perfis) e conversa com ele pelo protocolo DevTools (CDP).
 
 Nada de login, nada de dado pessoal: o perfil nasce vazio e só visita bases
 públicas de jurisprudência.
@@ -36,8 +36,10 @@ import urllib.request
 
 import websocket  # websocket-client
 
-PERFIL = os.environ.get("JURIS_OFICIAL_PERFIL") or os.path.join(
-    os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "juris-oficial", "navegador")
+_BASE = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "juris-oficial")
+PERFIL = os.environ.get("JURIS_OFICIAL_PERFIL") or os.path.join(_BASE, "perfis")
+# Perfil único e persistente das versões até a 1.0.1 (~170 MB), que não se usa mais.
+PERFIL_ANTIGO = None if os.environ.get("JURIS_OFICIAL_PERFIL") else os.path.join(_BASE, "navegador")
 # Modo da janela: "discreto" (padrão: janela real, mas fora da área visível da tela),
 # "visivel" (para depurar) ou "oculto" (headless – o Cloudflare do STJ NÃO passa assim).
 MODO = os.environ.get("JURIS_OFICIAL_NAVEGADOR_MODO", "discreto")
@@ -168,15 +170,33 @@ def _apagar_perfis_velhos():
                 shutil.rmtree(d, ignore_errors=True)
 
 
+def _apagar_perfil_antigo():
+    """Apaga o perfil das versões até a 1.0.1, se nenhum navegador o estiver usando:
+    o Chrome mantém travado o `lockfile` do perfil aberto (servidor antigo no ar)."""
+    if not PERFIL_ANTIGO or not os.path.isdir(PERFIL_ANTIGO):
+        return
+    try:
+        trava = os.path.join(PERFIL_ANTIGO, "lockfile")
+        if os.path.exists(trava):
+            os.remove(trava)
+    except OSError:
+        return
+    shutil.rmtree(PERFIL_ANTIGO, ignore_errors=True)
+
+
 def garantir(espera=30):
     """Sobe o navegador próprio se ele ainda não estiver no ar; devolve a porta."""
     global _proc, _job, _porta, _perfil, _geracao
     with _trava:
-        if _proc is not None and _proc.poll() is None and vivo(_porta):
-            return _porta
+        if _proc is not None and _proc.poll() is None:
+            for _ in range(3):  # um soluço da porta não derruba a busca de outra base
+                if vivo(_porta):
+                    return _porta
+                time.sleep(1)
         encerrar()
         os.makedirs(PERFIL, exist_ok=True)
         _apagar_perfis_velhos()
+        _apagar_perfil_antigo()
         _perfil = tempfile.mkdtemp(prefix="perfil-", dir=PERFIL)
         porta = _porta_livre()
         args = [_executavel(), "--remote-debugging-port=%d" % porta, "--user-data-dir=" + _perfil,

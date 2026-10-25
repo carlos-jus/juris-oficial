@@ -97,8 +97,9 @@ as consultas públicas que os próprios tribunais oferecem.
 
 O pacote não pede login nem senha e só acessa bases públicas; guarda apenas a lista de órgãos do
 DJEN (`%LOCALAPPDATA%\juris-oficial\orgaos_djen_trf1.json`). O navegador usado para STF/STJ tem
-perfil próprio, novo e vazio a cada abertura (dentro de `%LOCALAPPDATA%\juris-oficial\navegador`),
-separado do seu.
+perfil próprio, novo e vazio a cada abertura (dentro de `%LOCALAPPDATA%\juris-oficial\perfis`),
+separado do seu. O perfil único das versões até a 1.0.1 (`...\juris-oficial\navegador`) é
+apagado sozinho na primeira busca no STF ou no STJ.
 
 ## O navegador do STF/STJ
 
