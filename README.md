@@ -106,4 +106,4 @@ separado do seu.
   (`JURIS_OFICIAL_OCIOSO_S`, em segundos; `0` fecha ao fim de cada busca). Aberto, ocupa cerca de
   0,5 GB; reabrir custa uns 10 s na busca seguinte.
 - No Windows, ele morre junto com o servidor, mesmo se o servidor for encerrado à força.
-- A porta de depuração é escolhida na hora pelo próprio navegador e só escuta em `127.0.0.1`.
+- A porta de depuração é uma porta livre escolhida na hora e só escuta em `127.0.0.1`.

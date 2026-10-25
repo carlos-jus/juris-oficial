@@ -16,7 +16,8 @@ Ciclo de vida (o navegador ocupa ~0,5 GB e não pode sobrar):
   (~8 s), por isso o padrão não é fechar a cada busca;
 - no Windows, nasce dentro de um Job Object que o mata junto com este processo:
   servidor morto não deixa navegador órfão;
-- a porta de depuração é efêmera (escolhida pelo próprio navegador), só em 127.0.0.1.
+- a porta de depuração é uma porta livre escolhida na hora, só em 127.0.0.1 (nunca a
+  porta 0, que liga navigator.webdriver e trava o Cloudflare do STJ).
 """
 import atexit
 import contextlib
@@ -25,6 +26,7 @@ import glob
 import json
 import os
 import shutil
+import socket
 import subprocess
 import tempfile
 import threading
@@ -136,21 +138,24 @@ def _lancar(args):
     return p, job
 
 
-def _ler_porta(perfil, proc, espera):
-    """A porta efêmera que o navegador escolheu (--remote-debugging-port=0) sai no
-    arquivo DevToolsActivePort do perfil."""
-    arquivo = os.path.join(perfil, "DevToolsActivePort")
+def _porta_livre():
+    """Uma porta livre em 127.0.0.1, que o navegador recebe FIXA. Nunca
+    --remote-debugging-port=0: com ela o Chrome liga navigator.webdriver (medido no
+    Chrome 155) e o Cloudflare do STJ trava em "Confirme que é humano"."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _esperar_porta(porta, proc, espera):
+    """Espera o navegador abrir a porta. Com porta fixa ele não grava o
+    DevToolsActivePort no perfil, por isso a espera é na própria porta."""
     fim = time.time() + espera
     while time.time() < fim:
         if proc.poll() is not None:
             raise NavegadorIndisponivel("o navegador saiu logo ao abrir (código %s)" % proc.returncode)
-        try:
-            with open(arquivo, encoding="utf-8") as f:
-                porta = int(f.readline().strip())
-            if vivo(porta):
-                return porta
-        except (OSError, ValueError):
-            pass
+        if vivo(porta):
+            return porta
         time.sleep(0.3)
     raise NavegadorIndisponivel("o navegador não abriu a porta de depuração em %d s" % espera)
 
@@ -173,7 +178,8 @@ def garantir(espera=30):
         os.makedirs(PERFIL, exist_ok=True)
         _apagar_perfis_velhos()
         _perfil = tempfile.mkdtemp(prefix="perfil-", dir=PERFIL)
-        args = [_executavel(), "--remote-debugging-port=0", "--user-data-dir=" + _perfil,
+        porta = _porta_livre()
+        args = [_executavel(), "--remote-debugging-port=%d" % porta, "--user-data-dir=" + _perfil,
                 "--no-first-run", "--no-default-browser-check", "--disable-extensions",
                 "--disable-background-networking", "--lang=pt-BR"]
         if MODO == "oculto":
@@ -183,7 +189,7 @@ def garantir(espera=30):
         args.append("about:blank")
         _proc, _job = _lancar(args)
         try:
-            _porta = _ler_porta(_perfil, _proc, espera)
+            _porta = _esperar_porta(porta, _proc, espera)
         except Exception:
             encerrar()
             raise
