@@ -24,9 +24,10 @@ Write-Host "Python: $python"
 & $python -m pip install --quiet --disable-pip-version-check -r (Join-Path $pasta "requirements.txt")
 if ($LASTEXITCODE -ne 0) { Write-Host "Falha ao instalar as dependências." -ForegroundColor Red; exit 1 }
 # O teste do passo 5 não carrega o servidor: sem esta checagem, um SDK incompatível
-# (mcp 2.x removeu o FastMCP) só aparece no Claude como "Failed to connect".
-& $python -c "import sys`ntry: from mcp.server.fastmcp import FastMCP`nexcept Exception: sys.exit(1)"
-if ($LASTEXITCODE -ne 0) { Write-Host "O pacote 'mcp' instalado não traz o FastMCP (precisa ser 1.x). Rode: $python -m pip install `"mcp>=1.2,<2`"" -ForegroundColor Red; exit 1 }
+# (mcp 2.x removeu o FastMCP) ou uma dependência faltando só aparece no Claude como
+# "Failed to connect". São os mesmos imports do topo do servidor.py.
+& $python -c "import sys; sys.path.insert(0, sys.argv[1]); from mcp.server.fastmcp import FastMCP; from juris_oficial import bnp, diagnostico, fontes; from juris_oficial.comum import markdown" $pasta
+if ($LASTEXITCODE -ne 0) { Write-Host "O servidor não importa (ver o erro acima). Se for o FastMCP, o 'mcp' precisa ser 1.x: $python -m pip install `"mcp>=1.2,<2`"" -ForegroundColor Red; exit 1 }
 Write-Host "Dependências instaladas."
 
 # 3. Navegador (STJ e STF exigem Chrome ou Edge)

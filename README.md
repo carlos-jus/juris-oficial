@@ -95,5 +95,16 @@ as consultas públicas que os próprios tribunais oferecem.
 
 ## Privacidade
 
-O pacote não pede login nem senha, não guarda dados e só acessa bases públicas. O navegador usado
-para STF/STJ tem perfil próprio e vazio (`%LOCALAPPDATA%\juris-oficial\navegador`), separado do seu.
+O pacote não pede login nem senha e só acessa bases públicas; guarda apenas a lista de órgãos do
+DJEN (`%LOCALAPPDATA%\juris-oficial\orgaos_djen_trf1.json`). O navegador usado para STF/STJ tem
+perfil próprio, novo e vazio a cada abertura (dentro de `%LOCALAPPDATA%\juris-oficial\perfis`),
+separado do seu. O perfil único das versões até a 1.0.1 (`...\juris-oficial\navegador`) é
+apagado sozinho na primeira busca no STF ou no STJ.
+
+## O navegador do STF/STJ
+
+- Abre na primeira busca no STF ou no STJ e **fecha sozinho** depois de 3 minutos sem busca
+  (`JURIS_OFICIAL_OCIOSO_S`, em segundos; `0` fecha ao fim de cada busca). Aberto, ocupa cerca de
+  0,5 GB; reabrir custa uns 10 s na busca seguinte.
+- No Windows, ele morre junto com o servidor, mesmo se o servidor for encerrado à força.
+- A porta de depuração é uma porta livre escolhida na hora e só escuta em `127.0.0.1`.

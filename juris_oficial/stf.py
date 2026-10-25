@@ -29,7 +29,7 @@ _trava = threading.Lock()  # uma aba por base: buscas simultâneas fazem fila
 
 def _abrir():
     global _aba
-    if _aba is None:
+    if _aba is None or not _aba.valida():
         _aba = navegador.Aba()
         _aba.ir(PORTAL + "/pages/search", espera=60)
         time.sleep(6)  # o desafio do WAF grava o cookie depois do carregamento
@@ -85,7 +85,7 @@ def _julgado(src, base):
 
 
 def buscar(busca, *args, **kwargs):
-    with _trava:
+    with _trava, navegador.em_uso():
         return _buscar(busca, *args, **kwargs)
 
 

@@ -4,28 +4,46 @@
 O SCON do STJ (Cloudflare) e a base do STF (WAF da AWS) recusam `requests`, mas
 aceitam o `fetch` disparado de DENTRO de uma página aberta num Chrome ou Edge de
 verdade: mesma origem, cookies reais. Este módulo sobe um navegador SEPARADO do
-que a pessoa usa (perfil próprio em %LOCALAPPDATA%\\juris-oficial\\navegador, porta de
-depuração própria) e conversa com ele pelo protocolo DevTools (CDP).
+que a pessoa usa (perfil próprio, novo a cada abertura, dentro de
+%LOCALAPPDATA%\\juris-oficial\\perfis) e conversa com ele pelo protocolo DevTools (CDP).
 
 Nada de login, nada de dado pessoal: o perfil nasce vazio e só visita bases
 públicas de jurisprudência.
+
+Ciclo de vida (o navegador ocupa ~0,5 GB e não pode sobrar):
+- fecha sozinho depois de JURIS_OFICIAL_OCIOSO_S segundos sem busca (padrão 180;
+  0 = fecha ao fim de cada busca). Abrir de novo custa ~3 s + o desafio do portal
+  (~8 s), por isso o padrão não é fechar a cada busca;
+- no Windows, nasce dentro de um Job Object que o mata junto com este processo:
+  servidor morto não deixa navegador órfão;
+- a porta de depuração é uma porta livre escolhida na hora, só em 127.0.0.1 (nunca a
+  porta 0, que liga navigator.webdriver e trava o Cloudflare do STJ).
 """
+import atexit
+import contextlib
+import ctypes
+import glob
 import json
 import os
 import shutil
+import socket
 import subprocess
+import tempfile
+import threading
 import time
 import urllib.parse
 import urllib.request
 
 import websocket  # websocket-client
 
-PORTA = int(os.environ.get("JURIS_OFICIAL_PORTA", "9333"))
-PERFIL = os.environ.get("JURIS_OFICIAL_PERFIL") or os.path.join(
-    os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "juris-oficial", "navegador")
+_BASE = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "juris-oficial")
+PERFIL = os.environ.get("JURIS_OFICIAL_PERFIL") or os.path.join(_BASE, "perfis")
+# Perfil único e persistente das versões até a 1.0.1 (~170 MB), que não se usa mais.
+PERFIL_ANTIGO = None if os.environ.get("JURIS_OFICIAL_PERFIL") else os.path.join(_BASE, "navegador")
 # Modo da janela: "discreto" (padrão: janela real, mas fora da área visível da tela),
 # "visivel" (para depurar) ou "oculto" (headless – o Cloudflare do STJ NÃO passa assim).
 MODO = os.environ.get("JURIS_OFICIAL_NAVEGADOR_MODO", "discreto")
+OCIOSO_S = float(os.environ.get("JURIS_OFICIAL_OCIOSO_S", "180"))
 
 CANDIDATOS = [
     os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
@@ -57,7 +75,7 @@ def _executavel():
         "Não achei Chrome nem Edge. Instale um deles ou aponte o caminho em JURIS_OFICIAL_NAVEGADOR.")
 
 
-def vivo(porta=PORTA):
+def vivo(porta):
     try:
         urllib.request.urlopen("http://127.0.0.1:%d/json/version" % porta, timeout=2).read()
         return True
@@ -65,36 +83,204 @@ def vivo(porta=PORTA):
         return False
 
 
-def garantir(porta=PORTA, espera=30):
-    """Sobe o navegador próprio se ele ainda não estiver no ar."""
-    if vivo(porta):
-        return
-    os.makedirs(PERFIL, exist_ok=True)
-    args = [_executavel(), "--remote-debugging-port=%d" % porta, "--user-data-dir=" + PERFIL,
-            "--no-first-run", "--no-default-browser-check", "--disable-extensions",
-            "--disable-background-networking", "--lang=pt-BR"]
-    if MODO == "oculto":
-        args += ["--headless=new", "--window-size=1366,900"]
-    elif MODO == "discreto":
-        args += ["--window-position=-32000,-32000", "--window-size=1366,900"]
-    args.append("about:blank")
-    opcoes = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
-    if os.name == "nt":
-        opcoes["creationflags"] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | NEW_PROCESS_GROUP
-    subprocess.Popen(args, **opcoes)
+_trava = threading.RLock()
+_proc = None      # o navegador (Popen)
+_job = None       # Job Object que o mata junto com este processo (Windows)
+_porta = None
+_perfil = None    # pasta do perfil desta abertura; apagada ao fechar
+_geracao = 0      # muda a cada abertura: aba de um navegador já fechado não vale
+_em_uso = 0
+_relogio = None   # fechamento por ociosidade
+
+
+class _Limites(ctypes.Structure):  # JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+    _fields_ = [("PerProcessUserTimeLimit", ctypes.c_int64), ("PerJobUserTimeLimit", ctypes.c_int64),
+                ("LimitFlags", ctypes.c_uint32), ("MinimumWorkingSetSize", ctypes.c_size_t),
+                ("MaximumWorkingSetSize", ctypes.c_size_t), ("ActiveProcessLimit", ctypes.c_uint32),
+                ("Affinity", ctypes.c_size_t), ("PriorityClass", ctypes.c_uint32),
+                ("SchedulingClass", ctypes.c_uint32), ("IoCounters", ctypes.c_uint64 * 6),
+                ("ProcessMemoryLimit", ctypes.c_size_t), ("JobMemoryLimit", ctypes.c_size_t),
+                ("PeakProcessMemoryUsed", ctypes.c_size_t), ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+
+def _kernel32():
+    k = ctypes.WinDLL("kernel32", use_last_error=True)
+    k.CreateJobObjectW.restype = ctypes.c_void_p
+    k.CreateJobObjectW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p]
+    k.SetInformationJobObject.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_uint32]
+    k.AssignProcessToJobObject.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+    k.TerminateJobObject.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+    k.CloseHandle.argtypes = [ctypes.c_void_p]
+    return k
+
+
+def _lancar(args):
+    """Popen do navegador. No Windows ele nasce suspenso, entra num Job Object com
+    KILL_ON_JOB_CLOSE e só então roda: ele e todos os filhos morrem quando o último
+    handle do job fecha, o que o sistema faz sozinho quando este processo morre."""
+    opcoes = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    if os.name != "nt":
+        # shortcut: fora do Windows o navegador não morre com o servidor; subir para prctl/PDEATHSIG se alguém usar
+        return subprocess.Popen(args, **opcoes), None
+    k = _kernel32()
+    job = k.CreateJobObjectW(None, None)
+    limites = _Limites(LimitFlags=0x2000)  # JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    if not job or not k.SetInformationJobObject(job, 9, ctypes.byref(limites), ctypes.sizeof(limites)):
+        raise NavegadorIndisponivel("não consegui criar o Job Object (erro %d)" % ctypes.get_last_error())
+    # CREATE_SUSPENDED | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+    p = subprocess.Popen(args, creationflags=0x4 | 0x200 | 0x08000000, **opcoes)
+    amarrado = k.AssignProcessToJobObject(job, int(p._handle))
+    erro = ctypes.get_last_error()
+    if not amarrado:
+        p.kill()
+    ctypes.WinDLL("ntdll").NtResumeProcess(ctypes.c_void_p(int(p._handle)))
+    if not amarrado:
+        k.CloseHandle(job)
+        raise NavegadorIndisponivel("não consegui amarrar o navegador a este processo (erro %d)" % erro)
+    return p, job
+
+
+def _porta_livre():
+    """Uma porta livre em 127.0.0.1, que o navegador recebe FIXA. Nunca
+    --remote-debugging-port=0: com ela o Chrome liga navigator.webdriver (medido no
+    Chrome 155) e o Cloudflare do STJ trava em "Confirme que é humano"."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def _esperar_porta(porta, proc, espera):
+    """Espera o navegador abrir a porta. Com porta fixa ele não grava o
+    DevToolsActivePort no perfil, por isso a espera é na própria porta."""
     fim = time.time() + espera
     while time.time() < fim:
+        if proc.poll() is not None:
+            raise NavegadorIndisponivel("o navegador saiu logo ao abrir (código %s)" % proc.returncode)
         if vivo(porta):
-            return
-        time.sleep(0.5)
-    raise NavegadorIndisponivel("O navegador não abriu a porta %d em %d s." % (porta, espera))
+            return porta
+        time.sleep(0.3)
+    raise NavegadorIndisponivel("o navegador não abriu a porta de depuração em %d s" % espera)
+
+
+def _apagar_perfis_velhos():
+    """Perfis de aberturas que não fecharam limpo (processo morto) com mais de 1 dia."""
+    for d in glob.glob(os.path.join(PERFIL, "perfil-*")):
+        with contextlib.suppress(OSError):
+            if time.time() - os.path.getmtime(d) > 86400:
+                shutil.rmtree(d, ignore_errors=True)
+
+
+def _apagar_perfil_antigo():
+    """Apaga o perfil das versões até a 1.0.1, se nenhum navegador o estiver usando:
+    o Chrome mantém travado o `lockfile` do perfil aberto (servidor antigo no ar)."""
+    if not PERFIL_ANTIGO or not os.path.isdir(PERFIL_ANTIGO):
+        return
+    try:
+        trava = os.path.join(PERFIL_ANTIGO, "lockfile")
+        if os.path.exists(trava):
+            os.remove(trava)
+    except OSError:
+        return
+    shutil.rmtree(PERFIL_ANTIGO, ignore_errors=True)
+
+
+def garantir(espera=30):
+    """Sobe o navegador próprio se ele ainda não estiver no ar; devolve a porta."""
+    global _proc, _job, _porta, _perfil, _geracao
+    with _trava:
+        if _proc is not None and _proc.poll() is None:
+            for _ in range(3):  # um soluço da porta não derruba a busca de outra base
+                if vivo(_porta):
+                    return _porta
+                time.sleep(1)
+        encerrar()
+        os.makedirs(PERFIL, exist_ok=True)
+        _apagar_perfis_velhos()
+        _apagar_perfil_antigo()
+        _perfil = tempfile.mkdtemp(prefix="perfil-", dir=PERFIL)
+        porta = _porta_livre()
+        args = [_executavel(), "--remote-debugging-port=%d" % porta, "--user-data-dir=" + _perfil,
+                "--no-first-run", "--no-default-browser-check", "--disable-extensions",
+                "--disable-background-networking", "--lang=pt-BR"]
+        if MODO == "oculto":
+            args += ["--headless=new", "--window-size=1366,900"]
+        elif MODO == "discreto":
+            args += ["--window-position=-32000,-32000", "--window-size=1366,900"]
+        args.append("about:blank")
+        _proc, _job = _lancar(args)
+        try:
+            _porta = _esperar_porta(porta, _proc, espera)
+        except Exception:
+            encerrar()
+            raise
+        _geracao += 1
+        return _porta
+
+
+def encerrar():
+    """Fecha o navegador próprio (todos os processos) e apaga o perfil desta abertura."""
+    global _proc, _job, _porta, _perfil, _relogio
+    with _trava:
+        if _relogio is not None:
+            _relogio.cancel()
+            _relogio = None
+        if _job is not None:
+            k = _kernel32()
+            k.TerminateJobObject(_job, 0)
+            k.CloseHandle(_job)
+        elif _proc is not None and _proc.poll() is None:
+            _proc.terminate()
+        if _proc is not None:
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                _proc.wait(10)
+        if _perfil:
+            for _ in range(20):  # os filhos soltam os arquivos do perfil logo depois do pai
+                shutil.rmtree(_perfil, ignore_errors=True)
+                if not os.path.exists(_perfil):
+                    break
+                time.sleep(0.25)
+        _proc = _job = _porta = _perfil = None
+
+
+atexit.register(encerrar)  # saída limpa: fecha e apaga o perfil (saída à força: o job fecha)
+
+
+def _fechar_se_ocioso():
+    with _trava:
+        if _em_uso == 0:
+            encerrar()
+
+
+@contextlib.contextmanager
+def em_uso():
+    """Envolve cada busca: o navegador não fecha no meio dela e, ao fim da última
+    (com ou sem erro), arma o fechamento por ociosidade."""
+    global _em_uso, _relogio
+    with _trava:
+        _em_uso += 1
+        if _relogio is not None:
+            _relogio.cancel()
+            _relogio = None
+    try:
+        yield
+    finally:
+        with _trava:
+            _em_uso -= 1
+            if _em_uso == 0 and _proc is not None:
+                if OCIOSO_S <= 0:
+                    encerrar()
+                else:
+                    _relogio = threading.Timer(OCIOSO_S, _fechar_se_ocioso)
+                    _relogio.daemon = True
+                    _relogio.start()
 
 
 class Aba:
     """Uma aba nova no navegador próprio; fecha sozinha no `with`."""
 
-    def __init__(self, porta=PORTA):
-        garantir(porta)
+    def __init__(self):
+        porta = garantir()
+        self.geracao = _geracao
         self.porta = porta
         req = urllib.request.Request("http://127.0.0.1:%d/json/new?about:blank" % porta, method="PUT")
         alvo = json.loads(urllib.request.urlopen(req, timeout=15).read())
@@ -102,6 +288,10 @@ class Aba:
         self.ws = websocket.create_connection(alvo["webSocketDebuggerUrl"], timeout=120,
                                               suppress_origin=True)
         self._n = 0
+
+    def valida(self):
+        """Falso se o navegador desta aba já foi fechado (por ociosidade ou erro)."""
+        return self.geracao == _geracao and _proc is not None and _proc.poll() is None
 
     def __enter__(self):
         return self
