@@ -37,7 +37,7 @@ def _pronto(titulo):
 
 def _abrir():
     global _aba
-    if _aba is None:
+    if _aba is None or not _aba.valida():
         _aba = navegador.Aba()
         _aba.ir(BASE + "/SCON/", pronto_quando=_pronto, espera=60)
     return _aba
@@ -117,7 +117,7 @@ def _extrair(pagina, base):
 
 
 def buscar(busca, *args, **kwargs):
-    with _trava:
+    with _trava, navegador.em_uso():
         return _buscar(busca, *args, **kwargs)
 
 
