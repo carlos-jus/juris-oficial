@@ -11,6 +11,8 @@ Instâncias (todas respondem a `requests` simples, sem navegador):
 Pesquisa: POST em `...acao=jurisprudencia@jurisprudencia/listar_resultados`.
 Sintaxe: aspas, e, ou, não, prox, * (curinga).
 """
+import difflib
+import json
 import re
 import time
 
@@ -31,7 +33,47 @@ INSTANCIAS = {
 }
 TIPOS = {"acordao": "1", "monocratica": "2"}
 
+# Filtros do formulário: parâmetro -> (lista do ajax_carregar_listas_pesquisa, campo do POST).
+# O eproc filtra pelo RÓTULO exato (a chave da lista), não pelo valor em maiúsculas.
+FILTROS = {"classe": ("arrClasse", "selClasse[]"),
+           "relator": ("arrRelator", "selRelator[]"),
+           "orgao": ("arrOrgao", "selOrgao[]")}
+# Quais filtros cada base tem no formulário (medido em 25/10/2026): a TNU não tem o de órgão.
+FILTROS_DA_BASE = {"tnu": ("classe", "relator"), "trf2": tuple(FILTROS), "trf4": tuple(FILTROS),
+                   "trf6": tuple(FILTROS)}
+
 _sessoes = {}
+_listas = {}   # chave -> {parâmetro: [rótulos]}, carregada uma vez por sessão do servidor
+
+
+class FiltroInvalido(Exception):
+    """Valor de filtro que não casa com nenhum rótulo da base: não se filtra em silêncio."""
+
+
+def _carregar_listas(chave):
+    if chave not in _listas:
+        r = _sessao(chave).get(INSTANCIAS[chave][0] + "?acao=jurisprudencia@jurisprudencia/ajax_carregar_listas_pesquisa",
+                               timeout=40)
+        r.encoding = "iso-8859-1"
+        j = json.loads(r.text)
+        _listas[chave] = {p: list(j.get(arr) or {}) for p, (arr, _) in FILTROS.items()}
+    return _listas[chave]
+
+
+def _rotulo(chave, parametro, valor):
+    """Rótulo exato da base para o valor pedido (sem diferenciar caixa); senão FiltroInvalido
+    com os rótulos mais próximos, para quem chama corrigir."""
+    rotulos = _carregar_listas(chave)[parametro]
+    alvo = " ".join(valor.split()).lower()
+    for r in rotulos:
+        if " ".join(r.split()).lower() == alvo:
+            return r
+    minusc = {r.lower(): r for r in rotulos}
+    proximos = [r for r in rotulos if alvo in r.lower()]
+    proximos += [minusc[p] for p in difflib.get_close_matches(alvo, list(minusc), n=5, cutoff=0.4)
+                 if minusc[p] not in proximos]
+    raise FiltroInvalido("%s %r não existe na base %s; rótulos mais próximos: %s" % (
+        parametro, valor, chave.upper(), "; ".join(proximos[:5]) or "(nenhum parecido)"))
 
 
 def _sessao(chave):
@@ -116,8 +158,13 @@ def _extrair(pagina, tribunal, base, fonte):
 
 
 def buscar(tribunal, busca, maximo=10, tipo="acordao", ordem="relevancia", campo="inteiro_teor",
-           desde="", ate="", sintaxe_nativa=False):
-    """tribunal: TNU, TRF4, TRU4, TR4, TRF6, TRU6, TR6. desde/ate: dd/mm/aaaa (julgamento)."""
+           desde="", ate="", sintaxe_nativa=False, classe="", relator="", orgao=""):
+    """tribunal: TNU, TRF2, TRF4, TRU4, TR4, TRF6, TRU6, TR6. desde/ate: dd/mm/aaaa (julgamento).
+
+    classe, relator, orgao (opcionais): filtros do formulário, pelo nome como a base o escreve
+    (sem diferenciar caixa): classe="Agravo de Instrumento", relator="NOME", orgao="3ª Turma".
+    O rótulo exato vem da lista da própria base; valor que não casa NÃO filtra: volta erro com
+    os rótulos mais próximos. A TNU não tem o filtro de órgão (vem aviso, sem filtrar)."""
     tribunal = tribunal.upper()
     chave = next((k for k, (_, ori, _) in INSTANCIAS.items() if tribunal in ori), None)
     if not chave:
@@ -132,7 +179,15 @@ def buscar(tribunal, busca, maximo=10, tipo="acordao", ordem="relevancia", campo
              "dtDecisaoInicio": desde, "dtDecisaoFim": ate}
     if ordem == "data":
         dados["selOrdenacao"] = "1"
+    pedidos = {p: v.strip() for p, v in (("classe", classe), ("relator", relator), ("orgao", orgao))
+               if v and v.strip()}
+    sem_filtro = [p for p in pedidos if p not in FILTROS_DA_BASE[chave]]
     try:
+        for p in pedidos:
+            if p not in sem_filtro:
+                dados[FILTROS[p][1]] = _rotulo(chave, p, pedidos[p])
+        if sem_filtro:
+            res.aviso = "%s não tem o filtro de %s: a busca saiu sem ele" % (tribunal, ", ".join(sem_filtro))
         s = _sessao(chave)
         pagina_n = 1
         while len(res.julgados) < maximo:
@@ -161,10 +216,13 @@ def buscar(tribunal, busca, maximo=10, tipo="acordao", ordem="relevancia", campo
         res.julgados = res.julgados[:maximo]
         if res.total is None:
             res.erro = "a base respondeu sem o total de resultados (layout mudou?)"
+    except FiltroInvalido as e:
+        res.erro = str(e)
     except Exception as e:  # noqa: BLE001
         _sessoes.pop(chave, None)
         res.erro = "%s: %s" % (type(e).__name__, e)
     if tribunal == "TNU" and not res.erro:
-        res.aviso = ("Esta base tem os julgados da TNU de jul/2017 em diante; o acervo anterior "
-                     "fica na base antiga do CJF (buscar_tnu já consulta as duas quando pedido).")
+        aviso = ("Esta base tem os julgados da TNU de jul/2017 em diante; o acervo anterior "
+                 "fica na base antiga do CJF (buscar_tnu já consulta as duas quando pedido).")
+        res.aviso = (res.aviso + " | " if res.aviso else "") + aviso
     return res

@@ -99,8 +99,14 @@ def codigos(tribunais):
     return saida
 
 
-def pesquisar(busca, tribunais="STF,STJ,TNU,TRF1", maximo=5, tipo="acordao", ordem="relevancia"):
+EPROC = {c for _, origens, _ in eproc.INSTANCIAS.values() for c in origens}
+
+
+def pesquisar(busca, tribunais="STF,STJ,TNU,TRF1", maximo=5, tipo="acordao", ordem="relevancia",
+              classe="", relator="", orgao=""):
     alvos = codigos(tribunais)
+    filtros = {"classe": classe, "relator": relator, "orgao": orgao}
+    filtros = {p: v for p, v in filtros.items() if v and v.strip()}
 
     def um(cod):
         if cod not in FONTES:
@@ -108,7 +114,18 @@ def pesquisar(busca, tribunais="STF,STJ,TNU,TRF1", maximo=5, tipo="acordao", ord
                              erro="tribunal sem fonte automatizável configurada (códigos válidos: %s)"
                                   % ", ".join(FONTES))
         try:
-            return FONTES[cod][1](busca, maximo, tipo, ordem)
+            if filtros and cod in EPROC:
+                # direto no eproc: o acervo antigo que a TNU junta (CJF) não tem estes filtros
+                res = eproc.buscar(cod, busca, maximo, tipo=tipo, ordem=ordem, **filtros)
+                if cod == "TNU" and not res.erro:
+                    res.aviso += " | filtro aplicado só ao eproc; o acervo anterior do CJF não foi consultado"
+                return res
+            res = FONTES[cod][1](busca, maximo, tipo, ordem)
+            if filtros and not res.erro:
+                aviso = ("filtro (%s) não se aplica a esta base (só eproc: TNU, TRF2, TRF4, TRF6 e "
+                         "suas TRs/TRUs); a busca saiu sem ele" % ", ".join(filtros))
+                res.aviso = (res.aviso + " | " if res.aviso else "") + aviso
+            return res
         except Exception as e:  # noqa: BLE001
             return Resultado(fonte=FONTES[cod][0], tribunal=cod, busca=busca, erro="%s: %s" % (type(e).__name__, e))
 
