@@ -22,6 +22,7 @@ import datetime as dt
 import json
 import os
 import re
+import threading
 import time
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
@@ -136,16 +137,13 @@ def orgaos(instancia="TRF1", renovar=False):
     A API filtra por UM órgão por vez (orgaoId) e não tem filtro de instância, e as
     publicações de 1º grau soterram os acórdãos numa busca geral. Por isso a lista é
     descoberta varrendo 18 janelas mensais (~1 min por instância) e fica em cache por 30 dias."""
-    cache = {}
     try:
-        if os.path.exists(CACHE_ORGAOS):
-            cache = json.load(open(CACHE_ORGAOS, encoding="utf-8"))
-        item = cache.get(instancia) or {}
+        item = _ler_cache().get(instancia) or {}
         if not renovar and item.get("orgaos") and \
                 (dt.date.today() - dt.date.fromisoformat(item["data"])).days <= 30:
             return {int(k): v for k, v in item["orgaos"].items()}
     except Exception:
-        cache = {}
+        pass
     achados, hoje = {}, dt.date.today()
     for m in range(18):
         fim = hoje - dt.timedelta(days=30 * m)
@@ -157,10 +155,39 @@ def orgaos(instancia="TRF1", renovar=False):
                 if _instancia(it) == instancia and it.get("idOrgao"):
                     achados[int(it["idOrgao"])] = it.get("nomeOrgao") or ""
             time.sleep(0.4)
-    cache[instancia] = {"data": hoje.isoformat(), "orgaos": achados}
-    os.makedirs(os.path.dirname(CACHE_ORGAOS), exist_ok=True)
-    json.dump(cache, open(CACHE_ORGAOS, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+    _gravar_cache(instancia, {"data": hoje.isoformat(), "orgaos": achados})
     return achados
+
+
+_trava_cache = threading.Lock()
+
+
+def _ler_cache():
+    try:
+        with open(CACHE_ORGAOS, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def _gravar_cache(instancia, item):
+    """Relê e grava sob trava, por arquivo temporário: TRF1, TR1 e TRU1 descobrem em
+    paralelo (busca por grupo), e gravar o cache lido no começo apagava a instância
+    que o vizinho acabara de gravar; leitor no meio da escrita via JSON cortado."""
+    with _trava_cache:
+        cache = _ler_cache()
+        cache[instancia] = item
+        os.makedirs(os.path.dirname(CACHE_ORGAOS), exist_ok=True)
+        tmp = "%s.%d.tmp" % (CACHE_ORGAOS, os.getpid())
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, indent=1)
+        for _ in range(40):  # no Windows, um leitor com o arquivo aberto barra o replace por instantes
+            try:
+                os.replace(tmp, CACHE_ORGAOS)
+                return
+            except PermissionError:
+                time.sleep(0.025)
+        os.replace(tmp, CACHE_ORGAOS)
 
 
 def _por_orgao(instancia, frase, obrig, excl, ini, fim):
