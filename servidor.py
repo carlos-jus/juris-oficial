@@ -19,7 +19,8 @@ mcp = FastMCP("juris-oficial")
 
 @mcp.tool()
 def pesquisar_jurisprudencia(busca: str, tribunais: str = "STF,STJ,TNU,TRF1", maximo: int = 5,
-                             tipo: str = "acordao", ordem: str = "relevancia", completo: bool = False) -> str:
+                             tipo: str = "acordao", ordem: str = "relevancia", completo: bool = False,
+                             classe: str = "", relator: str = "", orgao: str = "") -> str:
     """Pesquisa julgados nas bases OFICIAIS de cada tribunal, em paralelo, e devolve
     ementa LITERAL, órgão, relator, datas e link do inteiro teor de cada um.
 
@@ -41,6 +42,13 @@ def pesquisar_jurisprudencia(busca: str, tribunais: str = "STF,STJ,TNU,TRF1", ma
     tipo: "acordao" (padrão) ou "monocratica" (STF, STJ, TNU, TRF4, TRF6 e suas TRs/TRUs).
     ordem: "relevancia" (padrão) ou "data" (mais recentes primeiro; STF, STJ, eproc).
     maximo: julgados por tribunal (1-50). completo: true traz a ementa sem corte.
+    classe, relator, orgao (opcionais; só nas bases eproc: TNU, TRF2, TRF4, TRF6 e suas
+    TRs/TRUs; a TNU não tem o de órgão): filtram pelo nome como a base o escreve, sem
+    diferenciar caixa nem acento; quando a base grava o mesmo nome de mais de um jeito
+    (com e sem acento, em maiúsculas e não), todas as grafias entram na busca e o aviso
+    as lista. Ex.: classe="Agravo de Instrumento", orgao="3ª Turma",
+    relator="NOME DO RELATOR". Nome que não existe na base volta como erro, com os mais
+    parecidos para corrigir. Nas demais bases o filtro não se aplica e a resposta avisa.
 
     COBERTURA E LIMITES (medidos em 24/10/2026; rode `listar_fontes` para o mapa):
       - TRF1, TR1 e TRU1: acórdãos recentes (último ano) vêm do DJEN, buscados órgão por
@@ -55,7 +63,8 @@ def pesquisar_jurisprudencia(busca: str, tribunais: str = "STF,STJ,TNU,TRF1", ma
 
     Antes de citar em peça: confira a literalidade no inteiro teor (campo Link).
     """
-    resultados = fontes.pesquisar(busca, tribunais, max(1, min(int(maximo), 50)), tipo, ordem)
+    resultados = fontes.pesquisar(busca, tribunais, max(1, min(int(maximo), 50)), tipo, ordem,
+                                  classe=classe, relator=relator, orgao=orgao)
     return "\n".join(markdown(r, completo) for r in resultados)
 
 
