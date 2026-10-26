@@ -117,13 +117,13 @@ def pesquisar(busca, tribunais="STF,STJ,TNU,TRF1", maximo=5, tipo="acordao", ord
             if filtros and cod in EPROC:
                 # direto no eproc: o acervo antigo que a TNU junta (CJF) não tem estes filtros
                 res = eproc.buscar(cod, busca, maximo, tipo=tipo, ordem=ordem, **filtros)
-                if cod == "TNU" and not res.erro:
+                if cod == "TNU" and tipo == "acordao" and not res.erro:
                     res.aviso += " | filtro aplicado só ao eproc; o acervo anterior do CJF não foi consultado"
                 return res
             res = FONTES[cod][1](busca, maximo, tipo, ordem)
             if filtros and not res.erro:
-                aviso = ("filtro (%s) não se aplica a esta base (só eproc: TNU, TRF2, TRF4, TRF6 e "
-                         "suas TRs/TRUs); a busca saiu sem ele" % ", ".join(filtros))
+                aviso = ("filtro de %s não se aplica a esta base (só eproc: TNU, TRF2, TRF4, TRF6 e "
+                         "suas TRs/TRUs); a busca saiu sem ele" % ", ".join(eproc.NOMES[p] for p in filtros))
                 res.aviso = (res.aviso + " | " if res.aviso else "") + aviso
             return res
         except Exception as e:  # noqa: BLE001

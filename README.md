@@ -49,8 +49,9 @@ retroatividade"*. Ferramentas:
 
 - `pesquisar_jurisprudencia(busca, tribunais, maximo, tipo, ordem, classe, relator, orgao)` – julgados,
   em paralelo; `classe`, `relator` e `orgao` filtram só nas bases eproc (TNU, TRF2, TRF4, TRF6 e suas
-  Turmas Recursais e TRUs; a TNU não tem o de órgão), pelo nome como a base o escreve, e nome que não
-  existe volta como erro com os mais parecidos;
+  Turmas Recursais e TRUs; a TNU não tem o de órgão), pelo nome como a base o escreve (sem diferenciar
+  caixa nem acento, e com todas as grafias que a base tiver do mesmo nome), e nome que não existe volta
+  como erro com os mais parecidos;
 - `buscar_precedentes_qualificados(busca, orgaos, tipos, numero)` – temas e súmulas (BNP);
 - `listar_fontes()` – o mapa de cobertura acima;
 - `diagnostico_fontes()` – testa cada base ao vivo.

@@ -44,7 +44,9 @@ def pesquisar_jurisprudencia(busca: str, tribunais: str = "STF,STJ,TNU,TRF1", ma
     maximo: julgados por tribunal (1-50). completo: true traz a ementa sem corte.
     classe, relator, orgao (opcionais; só nas bases eproc: TNU, TRF2, TRF4, TRF6 e suas
     TRs/TRUs; a TNU não tem o de órgão): filtram pelo nome como a base o escreve, sem
-    diferenciar caixa. Ex.: classe="Agravo de Instrumento", orgao="3ª Turma",
+    diferenciar caixa nem acento; quando a base grava o mesmo nome de mais de um jeito
+    (com e sem acento, em maiúsculas e não), todas as grafias entram na busca e o aviso
+    as lista. Ex.: classe="Agravo de Instrumento", orgao="3ª Turma",
     relator="NOME DO RELATOR". Nome que não existe na base volta como erro, com os mais
     parecidos para corrigir. Nas demais bases o filtro não se aplica e a resposta avisa.
 
